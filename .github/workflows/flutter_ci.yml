@@ -3,11 +3,12 @@ name: Flutter CI/CD Pipeline
 on:
   push:
     branches: [ main ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ main ]
 
 jobs:
-  # Job 1: কোড কোয়ালিটি এবং টেস্ট চেক
   analyze-and-test:
     name: Lint, Analyze and Run Tests
     runs-on: ubuntu-latest
@@ -37,11 +38,14 @@ jobs:
       - name: Run Flutter tests
         run: flutter test
 
-  # Job 2: APK বিল্ড এবং গিটহাবে স্টোর করা
-  build-apk:
-    name: Build Android Release APK
-    needs: analyze-and-test # প্রথম জব সফল হলে তবেই এটি চলবে
+  build-and-release:
+    name: Build Signed Artifacts and Create Release
+    needs: analyze-and-test
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -62,12 +66,30 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build Release APK
-        run: flutter build apk --release
+      - name: Decode Keystore to Root
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > upload-keystore.jks
 
-      - name: Upload Release APK as Artifact
-        uses: actions/upload-artifact@v4
+      - name: Build Signed APK
+        env:
+          KEYSTORE_PATH: "../../upload-keystore.jks"
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: flutter build apk --release --no-tree-shake-icons
+
+      - name: Build Signed App Bundle
+        env:
+          KEYSTORE_PATH: "../../upload-keystore.jks"
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: flutter build appbundle --release --no-tree-shake-icons
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: flutter-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
-          retention-days: 7
+          files: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/bundle/release/app-release.aab
+          generate_release_notes: true
