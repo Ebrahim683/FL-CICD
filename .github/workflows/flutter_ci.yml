@@ -1,0 +1,43 @@
+name: Flutter CI Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  analyze-and-test:
+    name: Lint, Analyze and Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      # ১. রিপোজিটরির কোড ভার্চুয়াল মেশিনে ক্লোন করা
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ২. জাভা এনভায়রনমেন্ট সেটআপ (অ্যান্ড্রয়েড বিল্ডের জন্য প্রয়োজন)
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # ৩. ফ্লাটার এসডিকে সেটআপ
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true # ডিপেন্ডেন্সি ক্যাশ রাখবে যাতে বিল্ড দ্রুত হয়
+
+      # ৪. প্যাকেজগুলো ডাউনলোড করা
+      - name: Install dependencies
+        run: flutter pub get
+
+      # ৫. কোড অ্যানালাইসিস (কোনো স্ট্যাটিক এরর বা ওয়ার্নিং আছে কি না)
+      - name: Run code analysis
+        run: flutter analyze
+
+      # ৬. ইউনিট ও উইজেট টেস্ট চালানো
+      - name: Run Flutter tests
+        run: flutter test
