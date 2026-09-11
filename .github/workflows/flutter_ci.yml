@@ -100,10 +100,10 @@ jobs:
 
       # ৬. Firebase App Distribution-এ APK আপলোড
       - name: Upload to Firebase App Distribution
-        uses: FirebaseExtended/action-app-distribution@v3
+        uses: wzieba/Firebase-App-Distribution-Github-Action@v1
         with:
           appId: ${{ secrets.FIREBASE_APP_ID }}
           serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           groups: qa-team
           file: build/app/outputs/flutter-apk/app-release.apk
-          releaseNotes: "New test build generated automatically from GitHub Actions."
+          releaseNotes: "Automated QA test build from CI/CD"
