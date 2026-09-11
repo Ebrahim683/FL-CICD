@@ -3,8 +3,6 @@ name: Flutter CI/CD Pipeline
 on:
   push:
     branches: [main]
-    tags:
-      - "v*"
   pull_request:
     branches: [main]
 
@@ -42,7 +40,7 @@ jobs:
     name: Build Signed Artifacts and Create Release
     needs: analyze-and-test
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref == 'refs/heads/main'
 
     permissions:
       contents: write
@@ -50,29 +48,60 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # পুরো ট্যাগ হিস্ট্রি চেক করার জন্য
+
+      - name: Extract Version from pubspec.yaml
+        id: version_check
+        run: |
+          # pubspec.yaml থেকে ভার্সন এবং বিল্ড নাম্বার আলাদা করা
+          FULL_VERSION=$(grep '^version: ' pubspec.yaml | sed 's/version: //')
+          VERSION_NAME=$(echo $FULL_VERSION | cut -d '+' -f 1 | tr -d '[:space:]')
+          BUILD_NUMBER=$(echo $FULL_VERSION | cut -d '+' -f 2 | tr -d '[:space:]')
+          TAG_NAME="v$VERSION_NAME"
+
+          echo "Detected App Version: $VERSION_NAME+$BUILD_NUMBER"
+          echo "Target Tag: $TAG_NAME"
+
+          # গিটহাবে এই ট্যাগটি আগে থেকেই আছে কি না চেক করা
+          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Tag $TAG_NAME already exists. Skipping release build."
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "New version detected! Proceeding with release."
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "APP_VERSION=$VERSION_NAME" >> $GITHUB_ENV
+            echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
+            echo "RELEASE_TAG=$TAG_NAME" >> $GITHUB_ENV
+          fi
 
       - name: Set up Java
+        if: steps.version_check.outputs.should_release == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: "temurin"
           java-version: "17"
 
       - name: Set up Flutter
+        if: steps.version_check.outputs.should_release == 'true'
         uses: subosito/flutter-action@v2
         with:
           channel: "stable"
           cache: true
 
       - name: Install dependencies
+        if: steps.version_check.outputs.should_release == 'true'
         run: flutter pub get
 
-      # ১. Secrets থেকে Keystore ডিকোড করে সরাসরি android/ ফোল্ডারে রাখা
+      # ১. Secrets থেকে Keystore ডিকোড
       - name: Decode Keystore
+        if: steps.version_check.outputs.should_release == 'true'
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/upload-keystore.jks
 
-      # ২. Secrets থেকে ভার্চুয়াল মেশিনে একটি key.properties ফাইল তৈরি করা
+      # ২. Secrets থেকে key.properties জেনারেট
       - name: Create key.properties
+        if: steps.version_check.outputs.should_release == 'true'
         run: |
           cat <<EOF > android/key.properties
           keyAlias=${{ secrets.KEY_ALIAS }}
@@ -81,41 +110,40 @@ jobs:
           storePassword=${{ secrets.KEYSTORE_PASSWORD }}
           EOF
 
-      # ৩. Signed APK বিল্ড (কোনো অতিরিক্ত env ভ্যারিয়েবল লাগবে না)
+      # ৩. Signed APK বিল্ড
       - name: Build Signed APK
+        if: steps.version_check.outputs.should_release == 'true'
         run: flutter build apk --release --no-tree-shake-icons
 
       # ৪. Signed AAB বিল্ড
       - name: Build Signed App Bundle
+        if: steps.version_check.outputs.should_release == 'true'
         run: flutter build appbundle --release --no-tree-shake-icons
 
-      # ৫. GitHub Release তৈরি ও ফাইল আপলোড
+      # ৫. স্বয়ংক্রিয়ভাবে গিট ট্যাগ এবং GitHub Release তৈরি
       - name: Create GitHub Release
+        if: steps.version_check.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "Release ${{ env.RELEASE_TAG }}"
           files: |
             build/app/outputs/flutter-apk/app-release.apk
             build/app/outputs/bundle/release/app-release.aab
           generate_release_notes: true
 
-      # ৬. Firebase CLI দিয়ে সরাসরি App Distribution-এ APK আপলোড
+      # ৬. Firebase App Distribution-এ আপলোড
       - name: Upload to Firebase App Distribution via CLI
+        if: steps.version_check.outputs.should_release == 'true'
         env:
           FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
-          # ১. সার্ভিস অ্যাকাউন্ট JSON ফাইল আকারে সেভ করা
           echo "$FIREBASE_SERVICE_ACCOUNT" > service-account.json
-
-          # ২. Firebase CLI ইনস্টল করা
           npm install -g firebase-tools
-
-          # ৩. সরাসরি CLI দিয়ে আপলোড করা
           export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json"
           firebase appdistribution:distribute build/app/outputs/flutter-apk/app-release.apk \
             --app "$FIREBASE_APP_ID" \
             --groups "qa-team" \
-            --release-notes "Automated QA test build from CI/CD"
-
-          # ৪. সিকিউরিটির জন্য ফাইলটি ক্লিনআপ করা
+            --release-notes "Automated build for version ${{ env.APP_VERSION }}+${{ env.BUILD_NUMBER }}"
           rm -f service-account.json
