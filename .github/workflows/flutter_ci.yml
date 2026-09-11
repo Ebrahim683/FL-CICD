@@ -2,11 +2,11 @@ name: Flutter CI/CD Pipeline
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     tags:
-      - 'v*'
+      - "v*"
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   analyze-and-test:
@@ -20,13 +20,13 @@ jobs:
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: "temurin"
+          java-version: "17"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
+          channel: "stable"
           cache: true
 
       - name: Install dependencies
@@ -54,38 +54,42 @@ jobs:
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: "temurin"
+          java-version: "17"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
+          channel: "stable"
           cache: true
 
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Decode Keystore to Root
+      # ১. Secrets থেকে Keystore ডিকোড করে প্রজেক্টের রুটে রাখা (যেহেতু গ্রেডলে rootProject.file দেওয়া আছে)
+      - name: Decode Keystore
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > upload-keystore.jks
 
+      # ২. Secrets থেকে ভার্চুয়াল মেশিনে একটি key.properties ফাইল তৈরি করা
+      - name: Create key.properties
+        run: |
+          cat <<EOF > android/key.properties
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          storeFile=upload-keystore.jks
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          EOF
+
+      # ৩. Signed APK বিল্ড (কোনো অতিরিক্ত env ভ্যারিয়েবল লাগবে না)
       - name: Build Signed APK
-        env:
-          KEYSTORE_PATH: "../../upload-keystore.jks"
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: flutter build apk --release --no-tree-shake-icons
 
+      # ৪. Signed AAB বিল্ড
       - name: Build Signed App Bundle
-        env:
-          KEYSTORE_PATH: "../../upload-keystore.jks"
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: flutter build appbundle --release --no-tree-shake-icons
 
+      # ৫. GitHub Release তৈরি ও ফাইল আপলোড
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
