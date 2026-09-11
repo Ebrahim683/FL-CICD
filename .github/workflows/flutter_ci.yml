@@ -66,10 +66,10 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # ১. Secrets থেকে Keystore ডিকোড করে প্রজেক্টের রুটে রাখা (যেহেতু গ্রেডলে rootProject.file দেওয়া আছে)
+      # ১. Secrets থেকে Keystore ডিকোড করে সরাসরি android/ ফোল্ডারে রাখা
       - name: Decode Keystore
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > upload-keystore.jks
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/upload-keystore.jks
 
       # ২. Secrets থেকে ভার্চুয়াল মেশিনে একটি key.properties ফাইল তৈরি করা
       - name: Create key.properties
